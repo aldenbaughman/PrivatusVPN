@@ -1,0 +1,4 @@
+
+
+#define LOCAL_SERVER_ADDRESS "127.0.0.1"
+#define LOCAL_SERVER_PORT 8080

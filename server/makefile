@@ -21,11 +21,11 @@ all: $(TARGET) run
 
 # Rule to link object files into the target executable
 $(TARGET): $(OBJS)
-	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) 
+	$(CXX) $(CXXFLAGS) -o $(TARGET) $(OBJS) -lssl -lcrypto
 
 # Rule to compile .cpp files into .o files
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@ -lssl -lcrypto
 
 # Rule to run the executable
 run: $(TARGET)

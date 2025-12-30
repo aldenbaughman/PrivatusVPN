@@ -31,6 +31,10 @@ void ServerSecureConnection::report_error(const std::string& error_message)
 
 ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, unsigned short int port) : m_ip_address(ip_address), m_port(port)
 {
+    SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+	std::cout << "[ServerSecureConnection] OpenSSL Version: " << OpenSSL_version(OPENSSL_VERSION) << std::endl;
+
 	//Loading and Checking input IP and port
 	std::cout << "[ServerSecureConnection] Initializing ServerSecureConnection with server info" << std::endl;
     serverAddress.sin_family = AF_INET; 
@@ -48,16 +52,7 @@ ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, un
 		//std::cout << "IP notation is not a valid IPv4 or IPv6 dotted-decimal address string." << std::endl;
 		report_error("IP notation is not a valid IPv4 or IPv6 dotted-decimal address string.");
 	}
-    std::cout << "[ServerSecureConnection] Initialization Success - IP: " << ip_address.c_str() << " Port: " << std::to_string(port) << std::endl;
 
-
-	//Creating and Binding Socket
-    /*
-    
-    if (is_socket_valid(sockfd)) {
-        
-    }
-	*/
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
         perror("socket");
         report_error("[ServerSecureConnection] Failed to create socket");
@@ -67,17 +62,16 @@ ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, un
     int optval = 1;
 	setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void *)&optval, sizeof(optval));
 
-
-    std::cout << "[ServerSecureConnection] Created Socket: " << std::to_string(sockfd) << std::endl;
     if ((bind(sockfd, (struct sockaddr *)&serverAddress, sizeof(serverAddress))) <0) {
         perror("bind");
         report_error("[ServerSecureConnection] Failed to bind socket and address");
     };
-	std::cout << "[ServerSecureConnection] Binding Successful " << std::endl;
+
+    std::cout << "[ServerSecureConnection] Initialization Success - IP: " << ip_address.c_str() << " | Port: " << std::to_string(port) << " | Socket: " << std::to_string(sockfd) << std::endl;
 	
 }
 
-void ServerSecureConnection::start(){
+void ServerSecureConnection::udptest(){
     //listen unessary for UDP 
 
     struct sockaddr_in cliaddr;
@@ -100,5 +94,9 @@ void ServerSecureConnection::start(){
     printf("[start] Recieved Datagram: %s\n", client_pkt); }
 
     std::cout << "[start] Recieved Datagram from: " << cliaddr.sin_addr.s_addr << std::endl;
+
+}
+
+void ServerSecureConnection::start(){
 
 }

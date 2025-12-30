@@ -50,17 +50,17 @@ ClientSecureConnection::ClientSecureConnection(const std::string& ip_address, un
 	if (WSAStartup(MAKEWORD(2, 2), &m_wsa_data) != 0) {
         report_error("WSAStartup failed");
     }
-	
-	//Loading and Checking input IP and port
-	std::cout << "[ClientSecureConnection] Initializing ClientSecureConnection with server info" << std::endl;
+	std::cout << "[ClientSecureConnection] WSAStartup Complete" << std::endl;
+
+	SSL_load_error_strings();
+    OpenSSL_add_ssl_algorithms();
+	std::cout << "[ClientSecureConnection] OpenSSL Version: " << OpenSSL_version(OPENSSL_VERSION) << std::endl;
     
 	// Creating socket file descriptor 
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
 		perror("socket");
 		report_error("Failed to make socket");
 	}
-	//std::cout << "[ClientSecureConnection] Created Socket: " << sockfd << std::endl;
-
 	
 	serverAddress.sin_family = AF_INET; 
 	serverAddress.sin_port = htons(m_port); 
@@ -82,7 +82,7 @@ ClientSecureConnection::ClientSecureConnection(const std::string& ip_address, un
 
 
 
-void ClientSecureConnection::secureConnect(){
+void ClientSecureConnection::udptest(){
 	//char pkt[bufferSize] = "Hello There";
 	const char *pkt = "LETS GOOOOOOOOOOOOOOOOOOOOOOOOOOO";
 
@@ -96,6 +96,25 @@ void ClientSecureConnection::secureConnect(){
 				std::cout << "[secureConnect] Failed to send pkt: " << std::to_string(send_error) << std::endl;
 			}
 	
+}
+
+void ClientSecureConnection::secureConnect(){
+	SSL_library_init();
+	SSL_load_error_strings();
+
+	const SSL_METHOD* method = DTLS_client_method();
+	SSL_CTX* ctx = SSL_CTX_new(method);
+
+	SSL_CTX_set_options(ctx, SSL_OP_NO_QUERY_MTU);
+
+
+	SSL* ssl = SSL_new(ctx);
+
+	BIO* bio = BIO_new_dgram(sockfd, BIO_NOCLOSE);
+
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &serverAddress);
+
+	SSL_set_bio(ssl, bio, bio);
 }
 
 

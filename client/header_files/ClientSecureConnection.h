@@ -4,6 +4,9 @@
 
 #include <string>
 #include <WS2tcpip.h>
+#include <openssl/ssl.h>   
+#include <openssl/err.h>   
+#include <openssl/bio.h>   
 
 class ClientSecureConnection
 {
@@ -21,6 +24,8 @@ private:
 
 public:
 	ClientSecureConnection(const std::string& ip_address, unsigned short int port);
+
+	void udptest();
 	void secureConnect();
 
 	bool is_socket_valid(SOCKET& socket);

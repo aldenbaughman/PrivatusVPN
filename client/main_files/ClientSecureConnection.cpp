@@ -26,13 +26,30 @@ void printWindowsServerAddress(const sockaddr_in& addr) {
     std::cout << "==========================================\n" << std::endl;
 }
 
+std::string get_ssl_error_string(int error) {
+    switch (error) {
+        case SSL_ERROR_NONE:             return "SSL_ERROR_NONE";
+        case SSL_ERROR_ZERO_RETURN:      return "SSL_ERROR_ZERO_RETURN (Connection closed)";
+        case SSL_ERROR_WANT_READ:        return "SSL_ERROR_WANT_READ";
+        case SSL_ERROR_WANT_WRITE:       return "SSL_ERROR_WANT_WRITE";
+        case SSL_ERROR_WANT_CONNECT:     return "SSL_ERROR_WANT_CONNECT";
+        case SSL_ERROR_WANT_ACCEPT:      return "SSL_ERROR_WANT_ACCEPT";
+        case SSL_ERROR_WANT_X509_LOOKUP: return "SSL_ERROR_WANT_X509_LOOKUP";
+        case SSL_ERROR_SYSCALL:          return "SSL_ERROR_SYSCALL (Check errno)";
+        case SSL_ERROR_SSL:              return "SSL_ERROR_SSL (Protocol error)";
+        default:                         return "UNKNOWN_SSL_ERROR";
+    }
+}
+
 void ClientSecureConnection::report_error(const std::string& error_message)
 {
 	int last_error = WSAGetLastError();
 	std::cerr << "WSAGetLastError: " << last_error << std::endl;
-
-	throw std::runtime_error(error_message);
 	
+	int err = errno;
+	std::cerr << "System Error: " << strerror(err) << " (Code: " << err << ")" << std::endl;
+	
+	throw std::runtime_error(error_message);
 }
 
 bool ClientSecureConnection::is_socket_valid(SOCKET& socket)
@@ -51,36 +68,101 @@ ClientSecureConnection::ClientSecureConnection(const std::string& ip_address, un
         report_error("WSAStartup failed");
     }
 	std::cout << "[ClientSecureConnection] WSAStartup Complete" << std::endl;
-
-	SSL_load_error_strings();
-    OpenSSL_add_ssl_algorithms();
-	std::cout << "[ClientSecureConnection] OpenSSL Version: " << OpenSSL_version(OPENSSL_VERSION) << std::endl;
     
 	// Creating socket file descriptor 
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
+    if ((m_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0){
 		perror("socket");
 		report_error("Failed to make socket");
 	}
 	
-	serverAddress.sin_family = AF_INET; 
-	serverAddress.sin_port = htons(m_port); 
+	m_serverAddress.sin_family = AF_INET; 
+	m_serverAddress.sin_port = htons(m_port); 
 
     //addr is loaded into serverAddress here
-	int return_value = inet_pton(AF_INET, ip_address.c_str(), &serverAddress.sin_addr.s_addr);
-	if ( return_value == -1)
-	{
+	int return_value = inet_pton(AF_INET, ip_address.c_str(), &m_serverAddress.sin_addr);
+	if ( return_value == -1){
 		report_error("Numeric conversion of the IP Address has failed.");
 	}
-	else if (return_value == 0)
-	{
-		//std::cout << "IP notation is not a valid IPv4 or IPv6 dotted-decimal address string." << std::endl;
+	else if (return_value == 0){
 		report_error("IP notation is not a valid IPv4 or IPv6 dotted-decimal address string.");
 	}
-    std::cout << "[ClientSecureConnection] Initialization Success - IP: " << m_ip_address << " | Port: " << std::to_string(port) << " | Socket: " << sockfd << std::endl;
+    std::cout << "[ClientSecureConnection] Initialization Success - IP: " << m_ip_address << " | Port: " << std::to_string(port) << " | Socket: " << m_sockfd << std::endl;
 
+	//Openssl Context
+	const SSL_METHOD* method = DTLS_client_method();
+	SSL_CTX* ctx = SSL_CTX_new(method); 
+	m_ssl_ctx = ctx;
+
+	SSL_CTX_set_options(m_ssl_ctx, SSL_OP_NO_QUERY_MTU);
+	SSL_CTX_set_verify(m_ssl_ctx, SSL_VERIFY_NONE, NULL);
+	
 }
 
+void ClientSecureConnection::secureConnect(){
+	SSL* ssl = SSL_new(m_ssl_ctx);
 
+	BIO* bio = BIO_new_dgram(m_sockfd, BIO_NOCLOSE);
+
+	SSL_set_options(ssl, SSL_OP_NO_QUERY_MTU);
+	SSL_set_mtu(ssl, 1000);
+
+	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_PEER, 0, &m_serverAddress);
+
+	SSL_set_bio(ssl, bio, bio);
+	SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
+
+	// Set the BIO to non-blocking mode
+	BIO_set_nbio(SSL_get_rbio(ssl), 1);
+
+	//set the initial timeout to 1 second in BIO_ctrl
+	long timeout_ms = 1000; 
+	BIO_ctrl(SSL_get_rbio(ssl), BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout_ms);
+
+	int result;
+	struct timeval timeout;
+	//try connecting to server 
+	//if it fails 
+	while ((result = SSL_connect(ssl)) <= 0) {
+		int error = SSL_get_error(ssl, result);
+
+		if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE ) {
+			int err = errno;
+			std::cerr << "System Error: " << strerror(err) << " (Code: " << err << ")" << std::endl;
+			std::cout << get_ssl_error_string(error) << std::endl;
+			// get_timeout keeps track of the last packet sent and 
+			// tells if it is ready to send another
+			if (DTLSv1_get_timeout(ssl, &timeout)) {
+				fd_set fdread;
+				FD_ZERO(&fdread);
+				FD_SET(m_sockfd, &fdread);
+				//select waits for a resposne on the socekt
+				select(m_sockfd + 1, &fdread, NULL, NULL, &timeout);
+			}
+	
+			// Tell OpenSSL to handle any expired timers/retransmissions
+			DTLSv1_handle_timeout(ssl);
+		}
+		else {
+			report_error(get_ssl_error_string(error));
+		}
+	}
+
+	std::cout << "[secureConnect] Client connect to server, waiting for message from server" << std::endl;
+
+	char buffer[4096];
+	int bytes_received = SSL_read(ssl, buffer, sizeof(buffer));
+	if (bytes_received > 0) {
+		std::cout << "[secureConnect] Message from server: " << buffer << std::endl;
+	} else {
+		std::cout << "[secureConnect] Possible error, packet from server recieved with no bytes" << std::endl;
+	}
+
+	const char* msg = "Thank you glad to be here!";
+    int bytes_sent = SSL_write(ssl, msg, strlen(msg));
+    if (bytes_sent <= 0) {
+        report_error("Packet failed to send");
+    }
+}
 
 void ClientSecureConnection::udptest(){
 	//char pkt[bufferSize] = "Hello There";
@@ -88,33 +170,29 @@ void ClientSecureConnection::udptest(){
 
 	//printWindowsServerAddress(serverAddress);
 
-	std::cout << "[secureConnect] Sending pkt to server" << std::endl;
+	std::cout << "[udptest] Sending pkt to server" << std::endl;
 	int send_error;
-	 if ((send_error = sendto(sockfd, (const char *)pkt, strlen(pkt),
-			0, (const struct sockaddr *) &serverAddress, sizeof(serverAddress))) < 0){
-				perror("sendto");
-				std::cout << "[secureConnect] Failed to send pkt: " << std::to_string(send_error) << std::endl;
-			}
+	if ((send_error = sendto(m_sockfd, (const char *)pkt, strlen(pkt),
+		0, (const struct sockaddr *) &m_serverAddress, sizeof(m_serverAddress))) < 0){
+			perror("sendto");
+			std::cout << "[udptest] Failed to send pkt: " << std::to_string(send_error) << std::endl;
+		}
+
+	char client_pkt[bufferSize];
+
+    int MAXLINE = 1024;
+	socklen_t lens = sizeof(m_serverAddress);
 	
-}
-
-void ClientSecureConnection::secureConnect(){
-	SSL_library_init();
-	SSL_load_error_strings();
-
-	const SSL_METHOD* method = DTLS_client_method();
-	SSL_CTX* ctx = SSL_CTX_new(method);
-
-	SSL_CTX_set_options(ctx, SSL_OP_NO_QUERY_MTU);
-
-
-	SSL* ssl = SSL_new(ctx);
-
-	BIO* bio = BIO_new_dgram(sockfd, BIO_NOCLOSE);
-
-	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_CONNECTED, 0, &serverAddress);
-
-	SSL_set_bio(ssl, bio, bio);
+	int n = recvfrom(m_sockfd, (char *)client_pkt, MAXLINE,  
+                0, ( struct sockaddr *) &m_serverAddress, 
+                &lens); 
+	if (n <= 0){
+		perror("recvfrom");
+		report_error("Failed to recieve packet");
+	}
+    client_pkt[n] = '\0'; 
+    printf("[udptest] Server Echo: %s\n", client_pkt); 
+	
 }
 
 

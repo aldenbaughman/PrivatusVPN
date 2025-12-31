@@ -7,7 +7,8 @@ int main()
 	try
 	{
 		ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
-		//clientSecureConnection.secureConnect();
+
+		clientSecureConnection.secureConnect();
 
 
 	}

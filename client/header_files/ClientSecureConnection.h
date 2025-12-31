@@ -11,14 +11,16 @@
 class ClientSecureConnection
 {
 private:
-	SOCKET sockfd {INVALID_SOCKET};
-	sockaddr_in serverAddress;
+	SOCKET m_sockfd {INVALID_SOCKET};
+	sockaddr_in m_serverAddress;
 	static const unsigned int bufferSize{1024};
 
 	std::string m_ip_address{};
 	unsigned short m_port{};
 
 	WSADATA m_wsa_data{};
+
+	SSL_CTX* m_ssl_ctx;
 
 	static void report_error(const std::string& message);
 

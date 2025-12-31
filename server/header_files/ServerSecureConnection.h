@@ -6,6 +6,8 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <openssl/ssl.h>
+
 
 class ServerSecureConnection
 {
@@ -22,7 +24,10 @@ private:
 public:
 	ServerSecureConnection(const std::string& ip_address, unsigned short int port);
 
+	void udptest();
 	void start();
+
+	
 
 	
 };

@@ -1,15 +1,17 @@
 #include <iostream>
 #include <stdexcept>
 #include "..\header_files\ClientSecureConnection.h"
+#include "..\header_files\VirtualNetworkInterface.h"
 
 int main()
 {
 	try
 	{
-		ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
+		//ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
 
-		clientSecureConnection.secureConnect();
+		//clientSecureConnection.secureConnect();
 
+		VirtualNetworkInterface virtualNetworkInterface{};
 
 	}
 	catch (const std::runtime_error& e)

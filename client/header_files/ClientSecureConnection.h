@@ -2,6 +2,8 @@
 #ifndef CLIENT_CONNECTION
 #define CLIENT_CONNECTION
 
+#include <iostream>
+#include <stdexcept>
 #include <string>
 #include <WS2tcpip.h>
 #include <openssl/ssl.h>   

@@ -11,7 +11,7 @@ TARGET = main
 TARGET_DEL = main.exe
 
 # Source files
-SRCS = main_files/main.cpp main_files/ClientSecureConnection.cpp
+SRCS = main_files/main.cpp main_files/ClientSecureConnection.cpp main_files/VirtualNetworkInterface.cpp
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)

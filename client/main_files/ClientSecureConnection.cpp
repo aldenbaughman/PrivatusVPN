@@ -1,6 +1,4 @@
 #include "../header_files/ClientSecureConnection.h"
-#include <iostream>
-#include <stdexcept>
 
 void printWindowsServerAddress(const sockaddr_in& addr) {
     // Buffer to hold the human-readable IP string

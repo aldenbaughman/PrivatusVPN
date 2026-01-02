@@ -40,7 +40,7 @@ void report_error(const std::string& error_message)
 
 
 HMODULE VirtualNetworkInterface::InitializeWintun(void){
-    std::wstring fullPath = L"C:\\Users\\spiri\\OneDrive\\Desktop\\ihatets\\PrivatusVPN\\wintun.dll";
+    std::wstring fullPath = L"C:\\Users\\spiri\\OneDrive\\Desktop\\PrivatusVPN\\client\\wintun.dll";
     HMODULE Wintun =LoadLibraryExW(fullPath.c_str(), NULL, LOAD_LIBRARY_SEARCH_APPLICATION_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!Wintun){
         return NULL;

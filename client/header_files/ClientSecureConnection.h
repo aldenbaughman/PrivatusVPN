@@ -1,14 +1,14 @@
+#pragma once
 
-#ifndef CLIENT_CONNECTION
-#define CLIENT_CONNECTION
 
-#include <iostream>
-#include <stdexcept>
-#include <string>
 #include <WS2tcpip.h>
 #include <openssl/ssl.h>   
 #include <openssl/err.h>   
 #include <openssl/bio.h>   
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
 
 class ClientSecureConnection
 {
@@ -37,6 +37,3 @@ public:
 };
 
 
-
-
-#endif 

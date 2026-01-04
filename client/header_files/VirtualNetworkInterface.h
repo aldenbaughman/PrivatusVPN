@@ -1,10 +1,18 @@
-#ifndef VIRTUAL_NETWORK_INTERFACE
-#define VIRTUAL_NETWORK_INTERFACE
+#pragma once
+
+//These are used to initialize ip stuff
+#include "wintun.h"
+#include <iphlpapi.h>
+#include <mstcpip.h>
+#include <winternl.h>
+#include <ws2tcpip.h>
 
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include "wintun.h"
+
+#include "PacketEnums.h"
+
 
 class VirtualNetworkInterface
 {
@@ -24,10 +32,12 @@ private:
     static WINTUN_ALLOCATE_SEND_PACKET_FUNC* WintunAllocateSendPacket;
     static WINTUN_SEND_PACKET_FUNC* WintunSendPacket;
 
+    WINTUN_ADAPTER_HANDLE m_adapter;
+
+
 public:
     VirtualNetworkInterface();
     static HMODULE InitializeWintun();
+    void ping_test();
 
 };
-
-#endif

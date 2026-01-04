@@ -12,6 +12,7 @@ int main()
 		//clientSecureConnection.secureConnect();
 
 		VirtualNetworkInterface virtualNetworkInterface{};
+		virtualNetworkInterface.ping_test();
 
 	}
 	catch (const std::runtime_error& e)

@@ -1,3 +1,4 @@
+
 #pragma once
 
 
@@ -24,14 +25,17 @@ private:
 
 	SSL_CTX* m_ssl_ctx;
 
+	SSL* m_ssl;
+
 	static void report_error(const std::string& message);
 
 public:
 	ClientSecureConnection(const std::string& ip_address, unsigned short int port);
+	void connect();
+	int send(const BYTE*, int);
+	int recv(BYTE* byteBuffer, int bufferSize);
 
 	void udptest();
-	void secureConnect();
-
 	bool is_socket_valid(SOCKET& socket);
 	
 };

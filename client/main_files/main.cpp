@@ -2,18 +2,17 @@
 #include <stdexcept>
 #include "..\header_files\ClientSecureConnection.h"
 #include "..\header_files\VirtualNetworkInterface.h"
+#include "..\header_files\VPNController.h"
 
 int main()
 {
 	try
 	{
-		//ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
-
-		//clientSecureConnection.secureConnect();
-
+		ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
 		VirtualNetworkInterface virtualNetworkInterface{};
-		virtualNetworkInterface.ping_test();
-
+		VPNController controller{clientSecureConnection, virtualNetworkInterface};
+		controller.start();
+		controller.readFromWintun();
 	}
 	catch (const std::runtime_error& e)
 	{

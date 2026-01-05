@@ -35,13 +35,12 @@ void class_print(std::string classname, std::string str){
     std::cout << classname_tag << str << std::endl;
 }
 
-void packet_print(BYTE* Packet, DWORD PacketSize){
+void VirtualNetworkInterface::packet_print(BYTE* Packet, DWORD PacketSize){
     IPVersion ver = static_cast<IPVersion>(Packet[0] >> 4);
-    //IPProtocol protocol = static_cast<IPProtocol>(Packet[9]); // The 10th byte is the Protocol field in IPv4
 
     switch (ver){
         case IPVersion::IPv4:
-            class_print("ping_test", 
+            class_print("packet_print", 
                             "IP type: " 
                             + IPVersionToString(ver) 
                             + " | Protocol Type: " 
@@ -50,7 +49,7 @@ void packet_print(BYTE* Packet, DWORD PacketSize){
                             + std::to_string(PacketSize));
             break;
         case IPVersion::IPv6:
-            class_print("ping_test", "IP type: " 
+            class_print("packet_print", "IP type: " 
                             + IPVersionToString(ver) 
                             + " | Protocol Type: " 
                             + IPProtocolToString(static_cast<IPProtocol>(Packet[6]))
@@ -60,15 +59,10 @@ void packet_print(BYTE* Packet, DWORD PacketSize){
     }
 }
 
-
-
-
 void report_error(const std::string& error_message)
 {
 	throw std::runtime_error(error_message);
 }
-
-
 
 HMODULE VirtualNetworkInterface::InitializeWintun(void){
     std::wstring fullPath = L"C:\\Users\\spiri\\OneDrive\\Desktop\\PrivatusVPN\\client\\wintun.dll";
@@ -81,32 +75,16 @@ HMODULE VirtualNetworkInterface::InitializeWintun(void){
     WintunOpenAdapter = (WINTUN_OPEN_ADAPTER_FUNC*)GetProcAddress(Wintun, "WintunOpenAdapter");
     WintunGetAdapterLUID = (WINTUN_GET_ADAPTER_LUID_FUNC*)GetProcAddress(Wintun, "WintunGetAdapterLUID");
     WintunGetRunningDriverVersion = (WINTUN_GET_RUNNING_DRIVER_VERSION_FUNC*)GetProcAddress(Wintun, "WintunGetRunningDriverVersion");
-
     WintunDeleteDriver = (WINTUN_DELETE_DRIVER_FUNC*)GetProcAddress(Wintun, "WintunDeleteDriver");
     WintunSetLogger = (WINTUN_SET_LOGGER_FUNC*)GetProcAddress(Wintun, "WintunSetLogger");
     WintunStartSession = (WINTUN_START_SESSION_FUNC*)GetProcAddress(Wintun, "WintunStartSession");
     WintunEndSession = (WINTUN_END_SESSION_FUNC*)GetProcAddress(Wintun, "WintunEndSession");
-
     WintunGetReadWaitEvent = (WINTUN_GET_READ_WAIT_EVENT_FUNC*)GetProcAddress(Wintun, "WintunGetReadWaitEvent");
     WintunReceivePacket = (WINTUN_RECEIVE_PACKET_FUNC*)GetProcAddress(Wintun, "WintunReceivePacket");
     WintunReleaseReceivePacket = (WINTUN_RELEASE_RECEIVE_PACKET_FUNC*)GetProcAddress(Wintun, "WintunReleaseReceivePacket");
     WintunAllocateSendPacket = (WINTUN_ALLOCATE_SEND_PACKET_FUNC*)GetProcAddress(Wintun, "WintunAllocateSendPacket");
     WintunSendPacket = (WINTUN_SEND_PACKET_FUNC*)GetProcAddress(Wintun, "WintunSendPacket");
 
-/*
-#define X(Name) ((*(FARPROC *)&Name = GetProcAddress(Wintun, #Name)) == NULL)
-    if (X("WintunCreateAdapter") || X("WintunCloseAdapter") || X("WintunOpenAdapter") || X("WintunGetAdapterLUID") ||
-        X("WintunGetRunningDriverVersion") || X("WintunDeleteDriver") || X("WintunSetLogger") || X("WintunStartSession") ||
-        X("WintunEndSession") || X("WintunGetReadWaitEvent") || X("WintunReceivePacket") || X("WintunReleaseReceivePacket") ||
-        X("WintunAllocateSendPacket") || X("WintunSendPacket"))
-#undef X
-    {
-        DWORD LastError = GetLastError();
-        FreeLibrary(Wintun);
-        SetLastError(LastError);
-        return NULL;
-    }
-*/
     return Wintun;
 }
 
@@ -119,7 +97,9 @@ VirtualNetworkInterface::VirtualNetworkInterface(){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to load wintun");
     }
+}
 
+void VirtualNetworkInterface::start(){
     //Addd actual GUID generator
     GUID SomeFixedGUID2 = { 0xdeadbeef, 0xface, 0x4ace, { 0x9e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 } };
 
@@ -130,11 +110,82 @@ VirtualNetworkInterface::VirtualNetworkInterface(){
     }
     
     class_print("VirtualNetworkInterface", "Wintun Create Adapter Initialized");
+    
+    MIB_UNICASTIPADDRESS_ROW AddressRow;
+    InitializeUnicastIpAddressEntry(&AddressRow);
+    WintunGetAdapterLUID(m_adapter, &AddressRow.InterfaceLuid);
+
+    AddressRow.Address.Ipv4.sin_family = AF_INET;
+    AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (0 << 16) | (0 << 8) | (1 << 0)); /* 10.0.0.1*/
+    AddressRow.OnLinkPrefixLength = 24; 
+    AddressRow.DadState = IpDadStatePreferred;
+
+    DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
+    if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS){
+        report_error("Failed to create Ip Address Entry, last error: " + LastError);
+    }
+    class_print("ping_test", "Created Ip Address Entry");
+
+    m_session = WintunStartSession(m_adapter, 0x400000);
+    if (!m_session)
+    {
+        printf("GetLastError #%d.\n", GetLastError());
+        report_error("Failed to create wintun session");
+    }
+    class_print("ping_test", "Created session");
+    char ipString[INET_ADDRSTRLEN];
+    if (inet_ntop(AF_INET, &(AddressRow.Address.Ipv4.sin_addr), ipString, INET_ADDRSTRLEN)) {
+        std::string txt = "Created Session with Address Row: ";
+        class_print("ping_test", (txt.append(ipString)));
+    } else {
+        std::cerr << "Failed to convert IP address. Error: " << WSAGetLastError() << std::endl;
+    }
+}
+
+HANDLE VirtualNetworkInterface::getReadWaitEvent(){
+    return WintunGetReadWaitEvent(m_session);
+}
+
+int VirtualNetworkInterface::recv(BYTE* byteBuffer){
+    DWORD packetSize;
+    BYTE* wintunPacket = WintunReceivePacket(m_session, &packetSize);
+    if (byteBuffer){
+        if (packetSize >= 20){
+            class_print("recv", "Packet recv'd");
+            memcpy(byteBuffer, wintunPacket, packetSize);
+            class_print("recv", "copied packet");
+            return packetSize;
+        }else{
+            class_print("ping_test", "Packet length Below 20 bytes");
+        }
+    }
+    return 1;
+}
+
+int VirtualNetworkInterface::releasePacket(BYTE* packet){
+    WintunReleaseReceivePacket(m_session, packet);
+    return 1;
+}
 
 
+int VirtualNetworkInterface::send(BYTE* bytePacket, int packetSize){
+    BYTE *packet = WintunAllocateSendPacket(m_session, packetSize);
+    memcpy(packet, bytePacket, packetSize);
+    WintunSendPacket(m_session, packet);
+    return 1;
 }
 
 void VirtualNetworkInterface::ping_test(){
+    //Addd actual GUID generator
+    GUID SomeFixedGUID2 = { 0xdeadbeef, 0xface, 0x4ace, { 0x9e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 } };
+
+    m_adapter = WintunCreateAdapter(L"HomeNet", L"Wintun", &SomeFixedGUID2);
+    if (!m_adapter){
+        printf("GetLastError #%d.\n", GetLastError());
+        report_error("Failed to create adapter");
+    }
+    
+    class_print("VirtualNetworkInterface", "Wintun Create Adapter Initialized");
     class_print("ping_test", "Starting ping test");
     MIB_UNICASTIPADDRESS_ROW AddressRow;
     class_print("ping_test", "Address Row");

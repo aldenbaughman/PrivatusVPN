@@ -32,12 +32,19 @@ private:
     static WINTUN_ALLOCATE_SEND_PACKET_FUNC* WintunAllocateSendPacket;
     static WINTUN_SEND_PACKET_FUNC* WintunSendPacket;
 
+    WINTUN_SESSION_HANDLE m_session;
     WINTUN_ADAPTER_HANDLE m_adapter;
 
 
 public:
     VirtualNetworkInterface();
     static HMODULE InitializeWintun();
+    void start();
+    int send(BYTE*, int);
+    int recv(BYTE*);
+    int releasePacket(BYTE*);
+    HANDLE getReadWaitEvent();
+    static void packet_print(BYTE* Packet, DWORD PacketSize);
     void ping_test();
 
 };

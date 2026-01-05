@@ -1,5 +1,23 @@
 #include "../header_files/ClientSecureConnection.h"
 
+void secure_class_print(std::string classname, std::string str){
+    std::string classname_tag = "[" + classname + "] ";
+    /*
+    int classname_tag_len = classname_tag.length();
+    int max_spaces_diff = classname_tag_len - max_print_spaces;
+    if (max_spaces_diff > max_print_spaces){
+        max_print_spaces = classname_tag_len;
+        
+    } 
+    else if (max_spaces_diff < 0){
+        max_spaces_diff *= (-1);
+        //std::cout << "Max spaces diff: " << std::to_string(max_spaces_diff) << std::endl;
+        classname_tag.append(max_spaces_diff, ' ');
+    }
+    */
+    std::cout << classname_tag << str << std::endl;
+}
+
 void printWindowsServerAddress(const sockaddr_in& addr) {
     // Buffer to hold the human-readable IP string
     // INET_ADDRSTRLEN is 16 (enough for "xxx.xxx.xxx.xxx")
@@ -96,32 +114,32 @@ ClientSecureConnection::ClientSecureConnection(const std::string& ip_address, un
 	
 }
 
-void ClientSecureConnection::secureConnect(){
-	SSL* ssl = SSL_new(m_ssl_ctx);
+void ClientSecureConnection::connect(){
+	m_ssl = SSL_new(m_ssl_ctx);
 
 	BIO* bio = BIO_new_dgram(m_sockfd, BIO_NOCLOSE);
 
-	SSL_set_options(ssl, SSL_OP_NO_QUERY_MTU);
-	SSL_set_mtu(ssl, 1000);
+	SSL_set_options(m_ssl, SSL_OP_NO_QUERY_MTU);
+	SSL_set_mtu(m_ssl, 1000);
 
 	BIO_ctrl(bio, BIO_CTRL_DGRAM_SET_PEER, 0, &m_serverAddress);
 
-	SSL_set_bio(ssl, bio, bio);
-	SSL_set_verify(ssl, SSL_VERIFY_NONE, NULL);
+	SSL_set_bio(m_ssl, bio, bio);
+	SSL_set_verify(m_ssl, SSL_VERIFY_NONE, NULL);
 
 	// Set the BIO to non-blocking mode
-	BIO_set_nbio(SSL_get_rbio(ssl), 1);
+	BIO_set_nbio(SSL_get_rbio(m_ssl), 1);
 
 	//set the initial timeout to 1 second in BIO_ctrl
 	long timeout_ms = 1000; 
-	BIO_ctrl(SSL_get_rbio(ssl), BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout_ms);
+	BIO_ctrl(SSL_get_rbio(m_ssl), BIO_CTRL_DGRAM_SET_RECV_TIMEOUT, 0, &timeout_ms);
 
 	int result;
 	struct timeval timeout;
 	//try connecting to server 
 	//if it fails 
-	while ((result = SSL_connect(ssl)) <= 0) {
-		int error = SSL_get_error(ssl, result);
+	while ((result = SSL_connect(m_ssl)) <= 0) {
+		int error = SSL_get_error(m_ssl, result);
 
 		if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE ) {
 			int err = errno;
@@ -129,7 +147,7 @@ void ClientSecureConnection::secureConnect(){
 			std::cout << get_ssl_error_string(error) << std::endl;
 			// get_timeout keeps track of the last packet sent and 
 			// tells if it is ready to send another
-			if (DTLSv1_get_timeout(ssl, &timeout)) {
+			if (DTLSv1_get_timeout(m_ssl, &timeout)) {
 				fd_set fdread;
 				FD_ZERO(&fdread);
 				FD_SET(m_sockfd, &fdread);
@@ -138,28 +156,34 @@ void ClientSecureConnection::secureConnect(){
 			}
 	
 			// Tell OpenSSL to handle any expired timers/retransmissions
-			DTLSv1_handle_timeout(ssl);
+			DTLSv1_handle_timeout(m_ssl);
 		}
 		else {
 			report_error(get_ssl_error_string(error));
 		}
 	}
 
-	std::cout << "[secureConnect] Client connect to server, waiting for message from server" << std::endl;
+	std::cout << "[secureConnect] Client connect to server" << std::endl;
+	
+}
 
-	char buffer[4096];
-	int bytes_received = SSL_read(ssl, buffer, sizeof(buffer));
-	if (bytes_received > 0) {
-		std::cout << "[secureConnect] Message from server: " << buffer << std::endl;
-	} else {
-		std::cout << "[secureConnect] Possible error, packet from server recieved with no bytes" << std::endl;
-	}
-
-	const char* msg = "Thank you glad to be here!";
-    int bytes_sent = SSL_write(ssl, msg, strlen(msg));
+int ClientSecureConnection::send(const BYTE* packet, int packetSize){
+    int bytes_sent = SSL_write(m_ssl, (const void *)packet, packetSize);
     if (bytes_sent <= 0) {
         report_error("Packet failed to send");
     }
+
+	return bytes_sent;
+}
+
+int ClientSecureConnection::recv(BYTE* byteBuffer, int bufferSize){
+	int bytes_received = SSL_read(m_ssl, byteBuffer, bufferSize);
+	if (bytes_received > 0) {
+		return bytes_received;
+	} else {
+		std::cout << "[secureConnect] Possible error, packet from server recieved with no bytes" << std::endl;
+		return 0;
+	}
 }
 
 void ClientSecureConnection::udptest(){

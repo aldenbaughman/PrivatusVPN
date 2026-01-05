@@ -23,6 +23,50 @@ void printServerAddress(const sockaddr_in& addr) {
     std::cout << "---------------------------" << std::endl;
 }
 
+void class_print(std::string classname, std::string str){
+    std::string classname_tag = "[" + classname + "] ";
+    /*
+    int classname_tag_len = classname_tag.length();
+    int max_spaces_diff = classname_tag_len - max_print_spaces;
+    if (max_spaces_diff > max_print_spaces){
+        max_print_spaces = classname_tag_len;
+        
+    } 
+    else if (max_spaces_diff < 0){
+        max_spaces_diff *= (-1);
+        //std::cout << "Max spaces diff: " << std::to_string(max_spaces_diff) << std::endl;
+        classname_tag.append(max_spaces_diff, ' ');
+    }
+    */
+    std::cout << classname_tag << str << std::endl;
+}
+
+void ServerSecureConnection::packet_print(uint8_t* Packet, int PacketSize){
+    IPVersion ver = static_cast<IPVersion>(Packet[0] >> 4);
+
+    switch (ver){
+        case IPVersion::IPv4:
+            class_print("packet_print", 
+                            "IP type: " 
+                            + IPVersionToString(ver) 
+                            + " | Protocol Type: " 
+                            + IPProtocolToString(static_cast<IPProtocol>(Packet[9])) 
+                            + " | Size: " 
+                            + std::to_string(PacketSize));
+            break;
+        case IPVersion::IPv6:
+            class_print("packet_print", "IP type: " 
+                            + IPVersionToString(ver) 
+                            + " | Protocol Type: " 
+                            + IPProtocolToString(static_cast<IPProtocol>(Packet[6]))
+                            + " | Size: " 
+                            + std::to_string(PacketSize));
+            break;
+        default:
+            class_print("packet_print", "packet has undefined format");
+    }
+}
+
 std::string get_ssl_error_string(int error) {
     switch (error) {
         case SSL_ERROR_NONE:             return "SSL_ERROR_NONE";
@@ -128,8 +172,7 @@ int ServerSecureConnection::verify_cookie(SSL *ssl, const unsigned char *cookie,
 }
 
 
-ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, short unsigned int port) : m_ip_address(ip_address), m_port(port)
-{
+ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, short unsigned int port) : m_ip_address(ip_address), m_port(port){
 
 	//Loading and Checking input IP and port
 	std::cout << "[ServerSecureConnection] Initializing ServerSecureConnection with server info" << std::endl;
@@ -205,8 +248,8 @@ ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, sh
 
 void ServerSecureConnection::start(){
     BIO* bio = BIO_new_dgram(m_sockfd, BIO_NOCLOSE);
-    SSL* ssl = SSL_new(m_ssl_ctx);
-    SSL_set_bio(ssl, bio, bio);
+    m_ssl = SSL_new(m_ssl_ctx);
+    SSL_set_bio(m_ssl, bio, bio);
 
     std::cout << "[start] Waiting for client to connect..." << std::endl;
     BIO_ADDR *client_addr = BIO_ADDR_new();
@@ -221,7 +264,7 @@ void ServerSecureConnection::start(){
 
         // Wait here (sleep) until data arrives
         if (select(m_sockfd + 1, &rfds, NULL, NULL, NULL) > 0) {
-            int listen_res = DTLSv1_listen(ssl, client_addr);
+            int listen_res = DTLSv1_listen(m_ssl, client_addr);
             if (listen_res > 0) break; // Valid cookie received!
         }
     }
@@ -229,11 +272,11 @@ void ServerSecureConnection::start(){
     std::cout << "[start] Client Attempting to connect: " << BIO_ADDR_hostname_string(client_addr, 1) << ":" << BIO_ADDR_service_string(client_addr, 1) << std::endl;
 
     //listen consumes socket, this tells socket to send to this addr
-    BIO_ctrl(SSL_get_rbio(ssl), BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
+    BIO_ctrl(SSL_get_rbio(m_ssl), BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
 
     int res;
-    while ((res = SSL_accept(ssl)) <= 0) {
-        int error = SSL_get_error(ssl, res);
+    while ((res = SSL_accept(m_ssl)) <= 0) {
+        int error = SSL_get_error(m_ssl, res);
         
         if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
             // Wait for the next handshake packet
@@ -242,35 +285,76 @@ void ServerSecureConnection::start(){
             FD_SET(m_sockfd, &rfds);
             
             struct timeval timeout;
-            if (DTLSv1_get_timeout(ssl, &timeout)) {
+            if (DTLSv1_get_timeout(m_ssl, &timeout)) {
                 select(m_sockfd + 1, &rfds, NULL, NULL, &timeout);
             } else {
                 select(m_sockfd + 1, &rfds, NULL, NULL, NULL);
             }
-            DTLSv1_handle_timeout(ssl);
+            DTLSv1_handle_timeout(m_ssl);
         } else {
             // A real error occurred
             report_error("Handshake failed: " + get_ssl_error_string(error));
         }
     }
-    
-    
+}
+
+int ServerSecureConnection::send(uint8_t* packet, int packetSize){
+    int bytes_sent = SSL_write(m_ssl, (const void *)packet, packetSize);
+    if (bytes_sent <= 0) {
+        report_error("Packet failed to send");
+    }
+
+	return bytes_sent;
+}
+
+int ServerSecureConnection::recv(uint8_t* packetBuffer, int bufferSize){
+    int bytes_received = SSL_read(m_ssl, packetBuffer, bufferSize);
+	if (bytes_received > 0) {
+		return bytes_received;
+	} else {
+		std::cout << "[secureConnect] Possible error, packet from server recieved with no bytes" << std::endl;
+		return 0;
+	}
+}
+
+
+
+void ServerSecureConnection::wintunReadTest(){
+    std::cout << "[wintunReadTest] Starting wintun Read test" << std::endl;
+    uint8_t packetBuffer[4096];
+    int bytes_received;
+    while(1){
+        bytes_received = SSL_read(m_ssl, (uint8_t*)packetBuffer, sizeof(packetBuffer));
+
+        //printf("[DEBUG] Raw Hex: %02x %02x %02x %02x\n", 
+                    //packetBuffer[0], packetBuffer[1], packetBuffer[2], packetBuffer[3]);
+
+        //std::cout << "[wintunReadTest] Recieved " + std::to_string(bytes_received) + " bytes" << std::endl;
+        //std::cout << "[wintunReadTest] Packet contents: " + packetBuffer << std::endl;
+        if (bytes_received > 0) {
+            packet_print(packetBuffer, bytes_received);
+        } else {
+            std::cout << "[secureConnect] Possible error, packet from client recieved with no bytes" << std::endl;
+        }
+    }
+}
+
+void ServerSecureConnection::sslSendRecvTest(){
     std::cout << "[start] Accepted Client and sending message" << std::endl;
 
     const char* msg = "Welcome to the Server!!!!";
-    int bytes_sent = SSL_write(ssl, msg, strlen(msg));
+    int bytes_sent = SSL_write(m_ssl, msg, strlen(msg));
     if (bytes_sent <= 0) {
         // Check SSL_get_error to see if the connection dropped
     }
 
     char buffer[4096];
-	int bytes_received = SSL_read(ssl, buffer, sizeof(buffer));
+	int bytes_received = SSL_read(m_ssl, buffer, sizeof(buffer));
 	if (bytes_received > 0) {
 		std::cout << "[secureConnect] Message from client: " << buffer << std::endl;
 	} else {
 		std::cout << "[secureConnect] Possible error, packet from client recieved with no bytes" << std::endl;
 	}
-
 }
 
 void ServerSecureConnection::udptest(){

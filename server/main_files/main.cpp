@@ -10,6 +10,8 @@ int main()
 
         ServerSecureConnection.start();
 
+		ServerSecureConnection.wintunReadTest();
+
 	}
 	catch (const std::runtime_error& e)
 	{

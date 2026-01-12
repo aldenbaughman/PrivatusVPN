@@ -11,9 +11,9 @@ int main()
 {
 	try
 	{
-		ClientSecureConnection clientSecureConnection{"127.0.0.1", 8080 };
+		ClientSecureConnection clientSecureConnection{"172.235.54.87", 8080 };
 		
-		VirtualNetworkInterface virtualNetworkInterface{"127.0.0.1", "10.8.0.1"};
+		VirtualNetworkInterface virtualNetworkInterface{"172.235.54.87", "10.8.0.1"};
 		//virtualNetworkInterface.start();
 		//virtualNetworkInterface.ping_test();
 		//virtualNetworkInterface.start();

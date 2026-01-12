@@ -45,12 +45,12 @@ void VPNController::start(){
 void VPNController::readFromWintun(){
     HANDLE WaitEvent = networkInterface.getReadWaitEvent();
     // 65535 is the max size of an IP packet (MTU + overhead)
-    
+    BYTE packetBuffer[65535];
     int packetSize;
     DWORD LastError;
 
     while(1){
-        BYTE packetBuffer[65535];
+        
         packetSize = networkInterface.recv(packetBuffer);
         vpn_class_print("readFromWinton", ("Packet Size: "+std::to_string(packetSize)));
         if (packetSize >= 20){

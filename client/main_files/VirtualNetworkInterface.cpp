@@ -160,9 +160,12 @@ void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIn
     // Routing Metadata
     route.dwForwardType = MIB_IPROUTE_TYPE_INDIRECT; 
     route.dwForwardProto = 3; // MIB_IPPROTO_NETMGMT
-    route.dwForwardMetric1 = 20; // Highest priority (lowest number)
+    route.dwForwardMetric1 = 30; // Highest priority (lowest number)
     route.dwForwardAge = 0; //setting it so route doesn't expire
     route.dwForwardPolicy = 0;
+
+    //Fixes 160 error
+    DeleteIpForwardEntry(&route);
 
     DWORD result = CreateIpForwardEntry(&route);
     
@@ -181,21 +184,35 @@ void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIn
     }
 }
 
-void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD interfaceIndex) {
+void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD wintunIndex) {
     MIB_IPFORWARDROW route;
     memset(&route, 0, sizeof(MIB_IPFORWARDROW));
 
     route.dwForwardDest = 0;         // 0.0.0.0 (Default)
     route.dwForwardMask = 0;         // 0.0.0.0
     route.dwForwardNextHop = newGatewayIp; // Your Server IP
-    route.dwForwardIfIndex = interfaceIndex; // Index of your Wintun adapter
-    route.dwForwardType = 4;         // 4 = MIB_IPROUTE_TYPE_INDIRECT
+    route.dwForwardIfIndex = wintunIndex; // Index of your Wintun adapter
+    route.dwForwardType = MIB_IPROUTE_TYPE_DIRECT;
     route.dwForwardProto = 3;        // 3 = MIB_IPPROTO_NETMGMT
-    route.dwForwardMetric1 = 1;      // Priority (Lower is better)
+    route.dwForwardMetric1 = 5;      // Priority (Lower is better)
+
+    route.dwForwardAge = 0;
+    route.dwForwardPolicy = 0;
+
+    DeleteIpForwardEntry(&route);
 
     // Call the API
     DWORD result = CreateIpForwardEntry(&route);
+
     if (result != NO_ERROR) {
+        // If Type 3 failed, try Type 4 as a fallback immediately
+        class_print("addTunnel", "trying type indirect");
+        route.dwForwardType = 4; 
+        result = CreateIpForwardEntry(&route);
+    }
+
+    if (result != NO_ERROR) {
+        printf("[Tunnel Error] Result: %lu, Gateway: %08X, IF: %lu\n", result, newGatewayIp, wintunIndex);
         std::string txt = "Problem creating Virtual Server Ip Forward Entry: err #";
         report_error(txt.append(std::to_string(result)));
     }
@@ -213,8 +230,15 @@ void VirtualNetworkInterface::start(){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to create adapter");
     }
+
+    m_session = WintunStartSession(m_adapter, 0x400000);
+    if (!m_session)
+    {
+        printf("GetLastError #%d.\n", GetLastError());
+        report_error("Failed to create wintun session");
+    }
     
-    class_print("VirtualNetworkInterface", "Wintun Create Adapter Initialized");
+    class_print("VirtualNetworkInterface", "Wintun Create Adapter and session Initialized");
     
     MIB_UNICASTIPADDRESS_ROW AddressRow;
     InitializeUnicastIpAddressEntry(&AddressRow);
@@ -228,18 +252,46 @@ void VirtualNetworkInterface::start(){
     AddressRow.OnLinkPrefixLength = 24; 
     AddressRow.DadState = IpDadStatePreferred;
 
+    //should fix issue of system checking for duplicate ips
+    AddressRow.SkipAsSource = FALSE; 
+
+    //nuclear optiojn for dad tenative stuff
+    std::string cmd = "netsh interface ipv4 set interface \"" + tunName + "\" dadtransmits=0";
+    system(cmd.c_str());
+
+    // Try setting this to 0 to make it permanent/immediate
+    AddressRow.ValidLifetime = 0xffffffff;
+    AddressRow.PreferredLifetime = 0xffffffff;
+
     DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
     if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS){
         report_error("Failed to create Ip Address Entry, last error: " + LastError);
     }
     class_print("start", "Created Ip Address Entry");
 
-    m_session = WintunStartSession(m_adapter, 0x400000);
-    if (!m_session)
-    {
-        printf("GetLastError #%d.\n", GetLastError());
-        report_error("Failed to create wintun session");
+    //waiting for some stupid ip to be "ready"
+    bool ready = false;
+    for (int i = 0; i < 20; i++) { // Try for 2 seconds (20 * 100ms)
+        MIB_UNICASTIPADDRESS_ROW row;
+        InitializeUnicastIpAddressEntry(&row);
+        row.InterfaceLuid = AddressRow.InterfaceLuid;
+        row.Address = AddressRow.Address;
+
+        if (GetUnicastIpAddressEntry(&row) == NO_ERROR) {
+            if (row.DadState == IpDadStatePreferred) {
+                class_print("start", "IP Address is now Preferred (Ready)");
+                ready = true;
+                break;
+            }
+        }
+        Sleep(500);
     }
+
+    if (!ready) {
+        report_error("IP Address stayed Tentative for too long.");
+    }
+
+    
 
     char ipString[INET_ADDRSTRLEN];
     if (inet_ntop(AF_INET, &(AddressRow.Address.Ipv4.sin_addr), ipString, INET_ADDRSTRLEN)) {
@@ -249,17 +301,17 @@ void VirtualNetworkInterface::start(){
         std::cerr << "Failed to convert IP address. Error: " << WSAGetLastError() << std::endl;
     }
 
-    DWORD routerIp, adapterIndex;
-    GetCurrentNetworkInfo(routerIp, adapterIndex);
+    DWORD routerIp, wifiIndex;
+    GetCurrentNetworkInfo(routerIp, wifiIndex);
 
     NET_LUID luid;
-    NET_IFINDEX index = 0;
+    NET_IFINDEX wintunIndex = 0;
     WintunGetAdapterLUID(m_adapter, &luid);
-    ConvertInterfaceLuidToIndex(&luid, &index);
+    ConvertInterfaceLuidToIndex(&luid, &wintunIndex);
 
-    //addRouteToVPNServer(m_physicalServerIp, routerIp, adapterIndex);
+    addRouteToVPNServer(m_physicalServerIp, routerIp, wifiIndex);
 
-    addTunnelToDefaultGateway(m_virtualServerIp, index);
+    addTunnelToDefaultGateway(m_virtualServerIp, wintunIndex);
 
 }
 

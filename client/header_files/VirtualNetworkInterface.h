@@ -7,12 +7,16 @@
 #include <winternl.h>
 #include <ws2tcpip.h>
 
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <netioapi.h>
+
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
 #include "PacketEnums.h"
-
+#pragma comment(lib, "iphlpapi.lib")
 
 class VirtualNetworkInterface
 {

@@ -8,7 +8,7 @@ int main()
 {
 	try
 	{
-		ServerSecureConnection secureConnection{ "127.0.0.1", 8080 };
+		ServerSecureConnection secureConnection{ "172.235.54.87", 8080 };
 		VirtualNetworkInterface networkInterface{ "10.8.0.1" };
 		VPNController controller{secureConnection, networkInterface};
 		controller.start();

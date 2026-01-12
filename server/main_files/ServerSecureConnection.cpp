@@ -272,7 +272,13 @@ void ServerSecureConnection::connect(){
     std::cout << "[connect] Client Attempting to connect: " << BIO_ADDR_hostname_string(client_addr, 1) << ":" << BIO_ADDR_service_string(client_addr, 1) << std::endl;
 
     //listen consumes socket, this tells socket to send to this addr
-    BIO_ctrl(SSL_get_rbio(m_ssl), BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
+    //BIO_ctrl(SSL_get_rbio(m_ssl), BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
+    
+    //this fixes errors caused when deployed on server 
+    if (BIO_dgram_set_peer(SSL_get_rbio(m_ssl), client_addr) <= 0) {
+        perror("BIO_dgram_set_peer failed");
+        report_error("BIO_dgram_set_peer failed");
+    }
 
     int res;
     while ((res = SSL_accept(m_ssl)) <= 0) {

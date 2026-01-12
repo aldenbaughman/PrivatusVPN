@@ -246,12 +246,12 @@ ServerSecureConnection::ServerSecureConnection(const std::string& ip_address, sh
     X509_free(cert);
 }
 
-void ServerSecureConnection::start(){
+void ServerSecureConnection::connect(){
     BIO* bio = BIO_new_dgram(m_sockfd, BIO_NOCLOSE);
     m_ssl = SSL_new(m_ssl_ctx);
     SSL_set_bio(m_ssl, bio, bio);
 
-    std::cout << "[start] Waiting for client to connect..." << std::endl;
+    std::cout << "[connect] Waiting for client to connect..." << std::endl;
     BIO_ADDR *client_addr = BIO_ADDR_new();
     //waits until the client has been verfied with a cookie
     //INEFFICENT, WHILE BLOCKING CONSUMES 100% OF CPU
@@ -269,7 +269,7 @@ void ServerSecureConnection::start(){
         }
     }
 
-    std::cout << "[start] Client Attempting to connect: " << BIO_ADDR_hostname_string(client_addr, 1) << ":" << BIO_ADDR_service_string(client_addr, 1) << std::endl;
+    std::cout << "[connect] Client Attempting to connect: " << BIO_ADDR_hostname_string(client_addr, 1) << ":" << BIO_ADDR_service_string(client_addr, 1) << std::endl;
 
     //listen consumes socket, this tells socket to send to this addr
     BIO_ctrl(SSL_get_rbio(m_ssl), BIO_CTRL_DGRAM_SET_PEER, 0, &client_addr);
@@ -296,6 +296,11 @@ void ServerSecureConnection::start(){
             report_error("Handshake failed: " + get_ssl_error_string(error));
         }
     }
+    std::cout << "[connect] Client Succesfully Connected to Server" << std::endl;
+}
+
+int ServerSecureConnection::getSockFd(){
+    return m_sockfd;
 }
 
 int ServerSecureConnection::send(uint8_t* packet, int packetSize){

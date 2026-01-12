@@ -1,19 +1,28 @@
 #include <iostream>
 #include <stdexcept>
 #include "../header_files/ServerSecureConnection.h"
+#include "../header_files/VirtualNetworkInterface.h"
+#include "../header_files/VPNController.h"
 
 int main()
 {
 	try
 	{
-		ServerSecureConnection ServerSecureConnection{ "127.0.0.1", 8080 };
+		ServerSecureConnection secureConnection{ "127.0.0.1", 8080 };
+		VirtualNetworkInterface networkInterface{ "10.8.0.1" };
+		VPNController controller{secureConnection, networkInterface};
+		controller.start();
+		controller.recvFromClient();
+		//ServerSecureConnection.connect();
+		//ServerSecureConnection.sslSendRecvTest();
+        //ServerSecureConnection.start();
 
-        ServerSecureConnection.start();
+		//ServerSecureConnection.wintunReadTest();
 
-		ServerSecureConnection.wintunReadTest();
+		//VirtualNetworkInterface networkInterface{};
 
 	}
-	catch (const std::runtime_error& e)
+	catch (const std::exception& e)
 	{
 		std::cerr << "Error: " << e.what() << std::endl;
 		return 1;

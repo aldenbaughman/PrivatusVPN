@@ -11,7 +11,7 @@ TARGET = main
 TARGET_DEL = main.exe
 
 # Source files
-SRCS = main_files/main.cpp main_files/ServerSecureConnection.cpp
+SRCS =  main_files/ServerSecureConnection.cpp main_files/VirtualNetworkInterface.cpp main_files/VPNController.cpp main_files/main.cpp
 
 # Object files
 OBJS = $(SRCS:.cpp=.o)
@@ -29,8 +29,8 @@ $(TARGET): $(OBJS)
 
 # Rule to run the executable
 run: $(TARGET)
-	$(TARGET)
+	sudo ./$(TARGET)
 
 # Clean rule to remove generated files
 clean:
-	del $(TARGET_DEL) $(OBJS)
+	rm $(TARGET_DEL) $(OBJS)

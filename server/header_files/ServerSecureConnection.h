@@ -42,7 +42,8 @@ private:
 public:
 	ServerSecureConnection(const std::string& ip_address, short unsigned int port);
 	
-	void start();
+	void connect();
+	int getSockFd();
 	int recv(uint8_t* packetBuffer, int bufferSize);
 	int send(uint8_t* packet, int packetSize);
 

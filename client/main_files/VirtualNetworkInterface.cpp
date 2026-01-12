@@ -1,4 +1,5 @@
 #include "../header_files/VirtualNetworkInterface.h"
+#include <cstdint>
 
 int max_print_spaces = 0;
 
@@ -84,11 +85,11 @@ HMODULE VirtualNetworkInterface::InitializeWintun(void){
     WintunReleaseReceivePacket = (WINTUN_RELEASE_RECEIVE_PACKET_FUNC*)GetProcAddress(Wintun, "WintunReleaseReceivePacket");
     WintunAllocateSendPacket = (WINTUN_ALLOCATE_SEND_PACKET_FUNC*)GetProcAddress(Wintun, "WintunAllocateSendPacket");
     WintunSendPacket = (WINTUN_SEND_PACKET_FUNC*)GetProcAddress(Wintun, "WintunSendPacket");
-
+    
     return Wintun;
 }
 
-VirtualNetworkInterface::VirtualNetworkInterface(){
+VirtualNetworkInterface::VirtualNetworkInterface(std::string physicalServerIp, std::string virtualServerIp){
     HMODULE wintunLib = InitializeWintun();
     if ( wintunLib != NULL ){
         class_print("VirtualNetworkInterface", "Loaded Wintun");
@@ -97,13 +98,117 @@ VirtualNetworkInterface::VirtualNetworkInterface(){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to load wintun");
     }
+
+    inet_pton(AF_INET, physicalServerIp.c_str(), &m_physicalServerIp);
+    class_print("VirtualNetworkInterface", "Server Physical IP: " + physicalServerIp + " - " + std::to_string(m_physicalServerIp));
+
+    inet_pton(AF_INET, virtualServerIp.c_str(), &m_virtualServerIp);
+    class_print("VirtualNetworkInterface", "Server Virtual IP: "+ virtualServerIp + " - " + std::to_string(m_virtualServerIp));
+}
+
+void GetCurrentNetworkInfo(DWORD& routerIp, DWORD& adapterIndex) {
+    MIB_IPFORWARDROW bestRoute;
+    
+    // We ask for the route to a public IP (like Google DNS)
+    // to see how the computer currently gets to the internet.
+    DWORD destAddr = inet_addr("8.8.8.8");
+
+    if (GetBestRoute(destAddr, 0, &bestRoute) == NO_ERROR) {
+        routerIp = bestRoute.dwForwardNextHop;
+        adapterIndex = bestRoute.dwForwardIfIndex;
+
+        // Optional: Print it to verify
+        struct in_addr ip_addr;
+        ip_addr.s_addr = routerIp;
+        std::cout << "Original Router: " << inet_ntoa(ip_addr) << std::endl;
+        std::cout << "Interface Index: " << adapterIndex << std::endl;
+    }
+    else { 
+        report_error("Failed to get Current Network Info");
+    }
+}
+
+void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIndex) {
+    // First, create a dummy row for the delete operation
+    MIB_IPFORWARDROW deleteRow;
+    memset(&deleteRow, 0, sizeof(MIB_IPFORWARDROW));
+    deleteRow.dwForwardDest = serverPublicIp;
+    deleteRow.dwForwardMask = 0xFFFFFFFF;
+    deleteRow.dwForwardIfIndex = wifiIndex;
+
+    // Delete it if it exists (ignore the error if it doesn't exist)
+    DeleteIpForwardEntry(&deleteRow);
+    
+    
+    
+    MIB_IPFORWARDROW route;
+    memset(&route, 0, sizeof(MIB_IPFORWARDROW));
+
+    // Destination: The specific public IP of your Linux VPS
+    // Since input is already a DWORD (Network Byte Order), assign directly
+    route.dwForwardDest = serverPublicIp;
+    
+    // Mask: 255.255.255.255 (Host route /32)
+    // 0xFFFFFFFF means this route applies ONLY to that one specific IP
+    route.dwForwardMask = 0xFFFFFFFF;
+
+    // Next Hop: Your local physical router (e.g., 192.168.1.1)
+    route.dwForwardNextHop = localRouterIp;
+
+    route.dwForwardIfIndex = wifiIndex;
+    
+    // Routing Metadata
+    route.dwForwardType = MIB_IPROUTE_TYPE_INDIRECT; 
+    route.dwForwardProto = 3; // MIB_IPPROTO_NETMGMT
+    route.dwForwardMetric1 = 20; // Highest priority (lowest number)
+    route.dwForwardAge = 0; //setting it so route doesn't expire
+    route.dwForwardPolicy = 0;
+
+    DWORD result = CreateIpForwardEntry(&route);
+    
+    if (result != NO_ERROR) {
+        if (result == ERROR_ALREADY_EXISTS) {
+            // This is actually fine; it means the route is already there
+            class_print("addRouteToVPNServer", "Route to server already exists.");
+        } else {
+            printf("[Route Error] Result: %lu, Dest: %08X, GW: %08X\n", 
+                result, serverPublicIp, localRouterIp);
+            printf("Error: %lu\n", result);
+            report_error("Failed to add physical route to VPN server.");
+        }
+    } else {
+        class_print("addRouteToVPNServer", "Successfully added exception route for VPN server.");
+    }
+}
+
+void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD interfaceIndex) {
+    MIB_IPFORWARDROW route;
+    memset(&route, 0, sizeof(MIB_IPFORWARDROW));
+
+    route.dwForwardDest = 0;         // 0.0.0.0 (Default)
+    route.dwForwardMask = 0;         // 0.0.0.0
+    route.dwForwardNextHop = newGatewayIp; // Your Server IP
+    route.dwForwardIfIndex = interfaceIndex; // Index of your Wintun adapter
+    route.dwForwardType = 4;         // 4 = MIB_IPROUTE_TYPE_INDIRECT
+    route.dwForwardProto = 3;        // 3 = MIB_IPPROTO_NETMGMT
+    route.dwForwardMetric1 = 1;      // Priority (Lower is better)
+
+    // Call the API
+    DWORD result = CreateIpForwardEntry(&route);
+    if (result != NO_ERROR) {
+        std::string txt = "Problem creating Virtual Server Ip Forward Entry: err #";
+        report_error(txt.append(std::to_string(result)));
+    }
 }
 
 void VirtualNetworkInterface::start(){
     //Addd actual GUID generator
     GUID SomeFixedGUID2 = { 0xdeadbeef, 0xface, 0x4ace, { 0x9e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 } };
+    std::string tunName = "VPN";
+    std::string ipStr = "10.8.0.2";
 
-    m_adapter = WintunCreateAdapter(L"HomeNet", L"Wintun", &SomeFixedGUID2);
+
+    m_adapter = WintunCreateAdapter(L"VPN", L"Wintun", &SomeFixedGUID2);
     if (!m_adapter){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to create adapter");
@@ -116,7 +221,10 @@ void VirtualNetworkInterface::start(){
     WintunGetAdapterLUID(m_adapter, &AddressRow.InterfaceLuid);
 
     AddressRow.Address.Ipv4.sin_family = AF_INET;
-    AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (0 << 16) | (0 << 8) | (1 << 0)); /* 10.0.0.1*/
+    //AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (8 << 16) | (0 << 8) | 2); /* 10.0.0.1*/
+    if (inet_pton(AF_INET, ipStr.c_str(), &AddressRow.Address.Ipv4.sin_addr) != 1){
+        report_error("Failed to Convert ip string in wintun start");
+    }
     AddressRow.OnLinkPrefixLength = 24; 
     AddressRow.DadState = IpDadStatePreferred;
 
@@ -124,7 +232,7 @@ void VirtualNetworkInterface::start(){
     if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS){
         report_error("Failed to create Ip Address Entry, last error: " + LastError);
     }
-    class_print("ping_test", "Created Ip Address Entry");
+    class_print("start", "Created Ip Address Entry");
 
     m_session = WintunStartSession(m_adapter, 0x400000);
     if (!m_session)
@@ -132,14 +240,27 @@ void VirtualNetworkInterface::start(){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to create wintun session");
     }
-    class_print("ping_test", "Created session");
+
     char ipString[INET_ADDRSTRLEN];
     if (inet_ntop(AF_INET, &(AddressRow.Address.Ipv4.sin_addr), ipString, INET_ADDRSTRLEN)) {
         std::string txt = "Created Session with Address Row: ";
-        class_print("ping_test", (txt.append(ipString)));
+        class_print("start", (txt.append(ipString)));
     } else {
         std::cerr << "Failed to convert IP address. Error: " << WSAGetLastError() << std::endl;
     }
+
+    DWORD routerIp, adapterIndex;
+    GetCurrentNetworkInfo(routerIp, adapterIndex);
+
+    NET_LUID luid;
+    NET_IFINDEX index = 0;
+    WintunGetAdapterLUID(m_adapter, &luid);
+    ConvertInterfaceLuidToIndex(&luid, &index);
+
+    //addRouteToVPNServer(m_physicalServerIp, routerIp, adapterIndex);
+
+    addTunnelToDefaultGateway(m_virtualServerIp, index);
+
 }
 
 HANDLE VirtualNetworkInterface::getReadWaitEvent(){
@@ -175,66 +296,24 @@ int VirtualNetworkInterface::send(BYTE* bytePacket, int packetSize){
     return 1;
 }
 
+VirtualNetworkInterface::~VirtualNetworkInterface(){
+    //Refinds the default gateway
+    //system("ipconfig /renew");
+}
+
 void VirtualNetworkInterface::ping_test(){
-    //Addd actual GUID generator
-    GUID SomeFixedGUID2 = { 0xdeadbeef, 0xface, 0x4ace, { 0x9e, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11 } };
-
-    m_adapter = WintunCreateAdapter(L"HomeNet", L"Wintun", &SomeFixedGUID2);
-    if (!m_adapter){
-        printf("GetLastError #%d.\n", GetLastError());
-        report_error("Failed to create adapter");
-    }
-    
-    class_print("VirtualNetworkInterface", "Wintun Create Adapter Initialized");
-    class_print("ping_test", "Starting ping test");
-    MIB_UNICASTIPADDRESS_ROW AddressRow;
-    class_print("ping_test", "Address Row");
-    InitializeUnicastIpAddressEntry(&AddressRow);
-    class_print("ping_test", "Ip address entry");
-    WintunGetAdapterLUID(m_adapter, &AddressRow.InterfaceLuid);
-    class_print("ping_test", "Combined adapter and address row");
-
-    AddressRow.Address.Ipv4.sin_family = AF_INET;
-    AddressRow.Address.Ipv4.sin_addr.S_un.S_addr = htonl((10 << 24) | (0 << 16) | (0 << 8) | (1 << 0)); /* 10.0.0.1*/
-    AddressRow.OnLinkPrefixLength = 24; 
-    AddressRow.DadState = IpDadStatePreferred;
-
-    DWORD LastError = CreateUnicastIpAddressEntry(&AddressRow);
-    if (LastError != ERROR_SUCCESS && LastError != ERROR_OBJECT_ALREADY_EXISTS){
-        report_error("Failed to create Ip Address Entry, last error: " + LastError);
-    }
-    class_print("ping_test", "Created Ip Address Entry");
-
-    WINTUN_SESSION_HANDLE Session = WintunStartSession(m_adapter, 0x400000);
-    if (!Session)
-    {
-        printf("GetLastError #%d.\n", GetLastError());
-        report_error("Failed to create wintun session");
-    }
-    class_print("ping_test", "Created session");
-    char ipString[INET_ADDRSTRLEN];
-    if (inet_ntop(AF_INET, &(AddressRow.Address.Ipv4.sin_addr), ipString, INET_ADDRSTRLEN)) {
-        std::string txt = "Created Session with Address Row: ";
-        class_print("ping_test", (txt.append(ipString)));
-    } else {
-        std::cerr << "Failed to convert IP address. Error: " << WSAGetLastError() << std::endl;
-    }
-
-    //in wintun example.c, two values are input read wait event and quit event, 
-    // in the case of error no more items, it uses WaitForMultipleObjects which waits
-    // for a new packet to be read or the signal to quit out of the while loop
-    HANDLE WaitEvent = WintunGetReadWaitEvent(Session);
+    HANDLE WaitEvent = WintunGetReadWaitEvent(m_session);
 
     while(1){
         DWORD PacketSize;
-        BYTE *Packet = WintunReceivePacket(Session, &PacketSize);
+        BYTE *Packet = WintunReceivePacket(m_session, &PacketSize);
         if (Packet){
             if (PacketSize >= 20){
                 packet_print(Packet, PacketSize);
             }else{
                 class_print("ping_test", "Packet length Below 20 bytes");
             }
-            WintunReleaseReceivePacket(Session, Packet);
+            WintunReleaseReceivePacket(m_session, Packet);
         }
         else{
             DWORD LastError = GetLastError();

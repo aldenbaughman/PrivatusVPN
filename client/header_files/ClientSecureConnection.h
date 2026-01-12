@@ -34,6 +34,9 @@ public:
 	void connect();
 	int send(const BYTE*, int);
 	int recv(BYTE* byteBuffer, int bufferSize);
+	SSL* getSSLPtr();
+	SOCKET getSslSock();
+	void close();
 
 	void udptest();
 	bool is_socket_valid(SOCKET& socket);

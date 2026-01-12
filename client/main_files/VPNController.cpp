@@ -1,7 +1,5 @@
 #include "../header_files/VPNController.h"
 
-
-
 void vpn_class_print(std::string classname, std::string str){
     std::string classname_tag = "[" + classname + "] ";
     /*
@@ -34,9 +32,17 @@ VPNController::VPNController(ClientSecureConnection secureConnection, VirtualNet
 void VPNController::start(){
     secureConnection.connect();
     networkInterface.start();
+
+    /*
+    std::thread first (&VPNController::readFromWintun, this);
+    std::thread second (&VPNController::recvFromServer, this);
+
+    first.join();
+    second.join();
+    */
 }
 
-BYTE* VPNController::readFromWintun(){
+void VPNController::readFromWintun(){
     HANDLE WaitEvent = networkInterface.getReadWaitEvent();
     // 65535 is the max size of an IP packet (MTU + overhead)
     
@@ -47,17 +53,22 @@ BYTE* VPNController::readFromWintun(){
         BYTE packetBuffer[65535];
         packetSize = networkInterface.recv(packetBuffer);
         vpn_class_print("readFromWinton", ("Packet Size: "+std::to_string(packetSize)));
-        if (packetBuffer && (packetSize >= 20)){
+        if (packetSize >= 20){
             vpn_class_print("readFromWinton", "Recieving packet from Wintun");
             networkInterface.packet_print(packetBuffer, packetSize);
-            secureConnection.send(packetBuffer, packetSize);
-            vpn_class_print("readFromWinton", "Packet Sent to Server");
+            if (secureConnection.send(packetBuffer, packetSize) >= 20){
+                vpn_class_print("readFromWinton", "BYTES SENT TO THE SERVER");
+            }else{
+                vpn_class_print("readFromWinton", "BYTES FAILED TO BE SENT TO SERVER");
+            }
+            
             networkInterface.releasePacket(packetBuffer);
         }
         else{
             LastError = GetLastError();
             
             switch (LastError){
+  
                 case ERROR_NO_MORE_ITEMS:
                     vpn_class_print("readFromWinton", "No more items, waiting for some to show up");
                     if (WaitForSingleObject(WaitEvent, INFINITE) == WAIT_OBJECT_0){
@@ -70,6 +81,53 @@ BYTE* VPNController::readFromWintun(){
             }   
         }
     }
+}
+
+void VPNController::recvFromServer(){
+    HANDLE socketEvent = WSACreateEvent();
+
+    SOCKET ssl_sock = secureConnection.getSslSock();
+    WSAEventSelect(ssl_sock, socketEvent, FD_READ | FD_CLOSE);
+
+    BYTE packetBuffer[65535];
+    int bufferSize;
+    int bytes_recieved;
+    DWORD waitResult;
+
+    while (1){
+        waitResult = WaitForSingleObject(socketEvent, INFINITE);
+        if (waitResult == WAIT_OBJECT_0){
+
+            while(1){
+                vpn_class_print("recvFromServer", "Packet received from Server");
+                bytes_recieved = secureConnection.recv(packetBuffer, bufferSize);
+                if (bytes_recieved >= 20){
+                    //send packet recieved from server to wintun
+                    networkInterface.send(packetBuffer, bytes_recieved);
+                    WSAResetEvent(socketEvent); 
+                }
+                else if (bytes_recieved == 0){
+                    //connection closed 
+                    vpn_report_error("Connection Closed");
+
+                }
+                else if (bytes_recieved < 0){
+                    vpn_report_error("SSL error check SSL_get_error");
+                }
+
+                if (SSL_pending(secureConnection.getSSLPtr()) == 0) {
+                    break;
+                }
+            }
+            WSAResetEvent(socketEvent);
+        }
+    }   
+}
+
+void VPNController::close(){
+    vpn_class_print("close","Properly closing objects");
+    //secureConnection.close();
+    //networkInterface.close();
 }
 
 
@@ -92,3 +150,5 @@ void VPNController::tls_test(){
 void wintun_test(){
 
 }
+
+

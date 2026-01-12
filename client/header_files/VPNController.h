@@ -15,8 +15,10 @@ private:
 public:
     VPNController(ClientSecureConnection, VirtualNetworkInterface);
     void start();
-    BYTE* readFromWintun();
-    
+    void readFromWintun();
+    void recvFromServer();
+    void close();
+
     void tls_test();
     void wintun_test();
 };

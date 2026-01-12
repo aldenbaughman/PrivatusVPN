@@ -167,6 +167,14 @@ void ClientSecureConnection::connect(){
 	
 }
 
+SSL* ClientSecureConnection::getSSLPtr(){
+	return m_ssl;
+}
+
+SOCKET ClientSecureConnection::getSslSock(){
+	return SSL_get_fd(m_ssl);
+}
+
 int ClientSecureConnection::send(const BYTE* packet, int packetSize){
     int bytes_sent = SSL_write(m_ssl, (const void *)packet, packetSize);
     if (bytes_sent <= 0) {
@@ -185,6 +193,21 @@ int ClientSecureConnection::recv(BYTE* byteBuffer, int bufferSize){
 		return 0;
 	}
 }
+
+void ClientSecureConnection::close(){
+	if (m_ssl){
+		SSL_shutdown(m_ssl);
+    	SSL_free(m_ssl);
+	}
+
+	if (m_ssl_ctx) {
+        SSL_CTX_free(m_ssl_ctx);
+    }
+	closesocket(m_sockfd);
+    EVP_cleanup();
+    ERR_free_strings();
+}
+
 
 void ClientSecureConnection::udptest(){
 	//char pkt[bufferSize] = "Hello There";

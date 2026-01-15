@@ -12,7 +12,8 @@ int main()
 		VirtualNetworkInterface networkInterface{ "10.8.0.1" };
 		VPNController controller{secureConnection, networkInterface};
 		controller.start();
-		controller.recvFromClient();
+		controller.singleThreadVPN();
+		//controller.recvFromClient();
 		//ServerSecureConnection.connect();
 		//ServerSecureConnection.sslSendRecvTest();
         //ServerSecureConnection.start();

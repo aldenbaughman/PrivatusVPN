@@ -16,4 +16,8 @@ public:
     void start();
     void readFromTun();
     void recvFromClient();
+
+    void STreadFromTun(uint8_t* byteBuffer, int bufferSize);
+    void STrecvFromClient(uint8_t* byteBuffer, int bufferSize);
+    void singleThreadVPN();
 };

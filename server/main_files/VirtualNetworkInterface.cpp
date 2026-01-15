@@ -21,6 +21,16 @@ VirtualNetworkInterface::VirtualNetworkInterface(std::string tunIpAddr) : m_tunI
     memset(&m_ifr, 0, sizeof(m_ifr)); 
 }
 
+//Replaces the client's "incorrect" ip of 10.8.0.2 with the server's ip 
+void masqueradeClientIp(const std::string& publicIf, const std::string& subnet) {
+    std::string cmd = "iptables -t nat -A POSTROUTING -s " + subnet + " -o " + publicIf + " -j MASQUERADE";
+    int res = system(cmd.c_str());
+    if (res != 0) {
+        perror("Failed to set NAT rule");
+        report_error("Failed to set NAT rule");
+    }
+}
+
 void VirtualNetworkInterface::start(){
     
     //setting interface flags to recieve ip packets with no extra padding
@@ -80,6 +90,8 @@ void VirtualNetworkInterface::start(){
             report_error("Error setting Link UP");
         }
     }
+
+    masqueradeClientIp("eth0", "10.8.0.0/24");
 
     close(sock_fd);
     

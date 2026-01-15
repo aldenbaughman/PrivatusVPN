@@ -16,7 +16,7 @@
 #include <string>
 
 #include "PacketEnums.h"
-#pragma comment(lib, "iphlpapi.lib")
+
 
 class VirtualNetworkInterface
 {

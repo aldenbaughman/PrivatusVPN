@@ -33,4 +33,4 @@ run: $(TARGET)
 
 # Clean rule to remove generated files
 clean:
-	del $(TARGET_DEL) $(OBJS)
+	del /f /q *.o *.exe main_files\*.o

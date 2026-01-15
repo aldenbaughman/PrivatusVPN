@@ -17,6 +17,10 @@ public:
     void start();
     void readFromWintun();
     void recvFromServer();
+
+    void STreadFromWintun(BYTE* byteBuffer);
+    void STrecvFromServer(BYTE* byteBuffer, int bufferSize);
+    void singleThreadVPN();
     void close();
 
     void tls_test();

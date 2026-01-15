@@ -89,6 +89,37 @@ HMODULE VirtualNetworkInterface::InitializeWintun(void){
     return Wintun;
 }
 
+void checkAdapterStatus(NET_IFINDEX index) {
+    MIB_IF_ROW2 row;
+    ZeroMemory(&row, sizeof(MIB_IF_ROW2));
+    row.InterfaceIndex = index;
+
+    if (GetIfEntry2(&row) == NO_ERROR) {
+        printf("Adapter Alias: %ws\n", row.Alias);
+        printf("Operational Status: ");
+        switch (row.OperStatus) {
+            case IfOperStatusUp: printf("UP\n"); break;
+            case IfOperStatusDown: printf("DOWN\n"); break;
+            default: printf("OTHER (%d)\n", row.OperStatus); break;
+        }
+        printf("Transmit Speed: %llu bps\n", row.TransmitLinkSpeed);
+    } else {
+        printf("Failed to retrieve adapter info for index %lu\n", index);
+    }
+}
+
+void CALLBACK MyWintunLogger(WINTUN_LOGGER_LEVEL Level, DWORD64 Timestamp, LPCWSTR Message) {
+    const char* levelStr = "INFO";
+    switch (Level) {
+        case WINTUN_LOG_INFO: levelStr = "INFO"; break;
+        case WINTUN_LOG_WARN: levelStr = "WARN"; break;
+        case WINTUN_LOG_ERR:  levelStr = "ERROR"; break;
+    }
+
+    // Wintun uses Wide Strings (LPCWSTR), so we use wprintf
+    fwprintf(stderr, L"[WINTUN-LOGGER %hs] %s\n", levelStr, Message);
+}
+
 VirtualNetworkInterface::VirtualNetworkInterface(std::string physicalServerIp, std::string virtualServerIp){
     HMODULE wintunLib = InitializeWintun();
     if ( wintunLib != NULL ){
@@ -104,9 +135,13 @@ VirtualNetworkInterface::VirtualNetworkInterface(std::string physicalServerIp, s
 
     inet_pton(AF_INET, virtualServerIp.c_str(), &m_virtualServerIp);
     class_print("VirtualNetworkInterface", "Server Virtual IP: "+ virtualServerIp + " - " + std::to_string(m_virtualServerIp));
+
+    class_print("VirtualNetworkInterface", "Setting up Wintun Logger");
+    WintunSetLogger(MyWintunLogger);
 }
 
 void GetCurrentNetworkInfo(DWORD& routerIp, DWORD& adapterIndex) {
+    
     MIB_IPFORWARDROW bestRoute;
     
     // We ask for the route to a public IP (like Google DNS)
@@ -129,6 +164,16 @@ void GetCurrentNetworkInfo(DWORD& routerIp, DWORD& adapterIndex) {
 }
 
 void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIndex) {
+    
+    //use this to find other name then ethernet: netsh interface show interface
+    //makes it so computer cannot reroute back to ethernet
+    
+    system("netsh interface ip set interface \"Ethernet\" metric=100");
+    //UNDO WITH: netsh interface ip set interface "Ethernet" metric=automatic
+    
+    
+    //system("route delete 0.0.0.0");
+
     // First, create a dummy row for the delete operation
     MIB_IPFORWARDROW deleteRow;
     memset(&deleteRow, 0, sizeof(MIB_IPFORWARDROW));
@@ -159,8 +204,13 @@ void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIn
     
     // Routing Metadata
     route.dwForwardType = MIB_IPROUTE_TYPE_INDIRECT; 
-    route.dwForwardProto = 3; // MIB_IPPROTO_NETMGMT
-    route.dwForwardMetric1 = 30; // Highest priority (lowest number)
+    route.dwForwardProto = MIB_IPPROTO_NETMGMT; // MIB_IPPROTO_NETMGMT
+
+    // THIS VALUE MUST BE 30 (!?!?!?) OR IT DOES NOT WORK
+    route.dwForwardMetric1 = 110; // Highest priority (lowest number)
+    route.dwForwardMetric2 = (DWORD)-1; // -1 means "not used"
+    route.dwForwardMetric3 = (DWORD)-1;
+    route.dwForwardMetric4 = (DWORD)-1;
     route.dwForwardAge = 0; //setting it so route doesn't expire
     route.dwForwardPolicy = 0;
 
@@ -185,14 +235,18 @@ void addRouteToVPNServer(DWORD serverPublicIp, DWORD localRouterIp, DWORD wifiIn
 }
 
 void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD wintunIndex) {
+    class_print("addTunnel", "188");
     MIB_IPFORWARDROW route;
     memset(&route, 0, sizeof(MIB_IPFORWARDROW));
+    class_print("addTunnel", "191");
 
+    //This is what changes the default gateway
     route.dwForwardDest = 0;         // 0.0.0.0 (Default)
     route.dwForwardMask = 0;         // 0.0.0.0
     route.dwForwardNextHop = newGatewayIp; // Your Server IP
     route.dwForwardIfIndex = wintunIndex; // Index of your Wintun adapter
     route.dwForwardType = MIB_IPROUTE_TYPE_DIRECT;
+    // THIS VALUE MUST BE 3 (!?!?!?) OR IT DOES NOT WORK
     route.dwForwardProto = 3;        // 3 = MIB_IPPROTO_NETMGMT
     route.dwForwardMetric1 = 5;      // Priority (Lower is better)
 
@@ -200,9 +254,10 @@ void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD wintunIndex) {
     route.dwForwardPolicy = 0;
 
     DeleteIpForwardEntry(&route);
-
+    class_print("addTunnel", "204");
     // Call the API
     DWORD result = CreateIpForwardEntry(&route);
+    class_print("addTunnel", "207");
 
     if (result != NO_ERROR) {
         // If Type 3 failed, try Type 4 as a fallback immediately
@@ -216,6 +271,8 @@ void addTunnelToDefaultGateway(DWORD newGatewayIp, DWORD wintunIndex) {
         std::string txt = "Problem creating Virtual Server Ip Forward Entry: err #";
         report_error(txt.append(std::to_string(result)));
     }
+
+    
 }
 
 void VirtualNetworkInterface::start(){
@@ -230,6 +287,8 @@ void VirtualNetworkInterface::start(){
         printf("GetLastError #%d.\n", GetLastError());
         report_error("Failed to create adapter");
     }
+
+    
 
     m_session = WintunStartSession(m_adapter, 0x400000);
     if (!m_session)
@@ -313,6 +372,12 @@ void VirtualNetworkInterface::start(){
 
     addTunnelToDefaultGateway(m_virtualServerIp, wintunIndex);
 
+    //allows vpn to do dns searches
+    std::string dnsCmd = "netsh interface ipv4 add dnsserver \""+ tunName +"\" address=8.8.8.8 index=1";
+    //system(dnsCmd.c_str());
+
+
+    checkAdapterStatus(wintunIndex);
 }
 
 HANDLE VirtualNetworkInterface::getReadWaitEvent(){
@@ -322,14 +387,17 @@ HANDLE VirtualNetworkInterface::getReadWaitEvent(){
 int VirtualNetworkInterface::recv(BYTE* byteBuffer){
     DWORD packetSize;
     BYTE* wintunPacket = WintunReceivePacket(m_session, &packetSize);
+    
     if (byteBuffer){
         if (packetSize >= 20){
-            class_print("recv", "Packet recv'd");
+            class_print("wintunRecv", "Packet recv'd with size: " + std::to_string(packetSize));
+            packet_print(wintunPacket, packetSize);
             memcpy(byteBuffer, wintunPacket, packetSize);
-            class_print("recv", "copied packet");
+            class_print("wintunRecv", "copied packet");
             return packetSize;
         }else{
-            class_print("ping_test", "Packet length Below 20 bytes");
+            class_print("wintunRecv", "Packet length Below 20 bytes");
+            WintunReleaseReceivePacket(m_session, byteBuffer);
         }
     }
     return 1;

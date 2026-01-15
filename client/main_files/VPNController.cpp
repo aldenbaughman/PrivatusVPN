@@ -1,18 +1,16 @@
 #include "../header_files/VPNController.h"
 
+int VPN_max_print_tag = 0;
+
 void vpn_class_print(std::string classname, std::string str){
     std::string classname_tag = "[" + classname + "] ";
     /*
     int classname_tag_len = classname_tag.length();
-    int max_spaces_diff = classname_tag_len - max_print_spaces;
-    if (max_spaces_diff > max_print_spaces){
-        max_print_spaces = classname_tag_len;
-        
-    } 
-    else if (max_spaces_diff < 0){
-        max_spaces_diff *= (-1);
-        //std::cout << "Max spaces diff: " << std::to_string(max_spaces_diff) << std::endl;
-        classname_tag.append(max_spaces_diff, ' ');
+    if (classname_tag_len <= VPN_max_print_tag){
+        classname_tag.append((VPN_max_print_tag - classname_tag_len), ' ');
+    }
+    else{
+        VPN_max_print_tag = classname_tag_len;
     }
     */
     std::cout << classname_tag << str << std::endl;
@@ -32,14 +30,6 @@ VPNController::VPNController(ClientSecureConnection secureConnection, VirtualNet
 void VPNController::start(){
     secureConnection.connect();
     networkInterface.start();
-
-    /*
-    std::thread first (&VPNController::readFromWintun, this);
-    std::thread second (&VPNController::recvFromServer, this);
-
-    first.join();
-    second.join();
-    */
 }
 
 void VPNController::readFromWintun(){
@@ -71,6 +61,7 @@ void VPNController::readFromWintun(){
   
                 case ERROR_NO_MORE_ITEMS:
                     vpn_class_print("readFromWinton", "No more items, waiting for some to show up");
+                    std::cout << std::endl;
                     if (WaitForSingleObject(WaitEvent, INFINITE) == WAIT_OBJECT_0){
                         continue;
                     }
@@ -80,6 +71,7 @@ void VPNController::readFromWintun(){
                     vpn_report_error("Failed to read packet");
             }   
         }
+        std::cout << std::endl;
     }
 }
 
@@ -122,6 +114,79 @@ void VPNController::recvFromServer(){
             WSAResetEvent(socketEvent);
         }
     }   
+}
+
+void VPNController::STreadFromWintun(BYTE* byteBuffer){
+    int packetSize = networkInterface.recv(byteBuffer);
+    if (packetSize >= 20){
+        vpn_class_print("STreadFromWinton", "Recieving packet from Wintun");
+        networkInterface.packet_print(byteBuffer, packetSize);
+        if (secureConnection.send(byteBuffer, packetSize) >= 20){
+        }else{
+            vpn_class_print("STreadFromWinton", "Bytes failed to send");
+        }
+        
+        networkInterface.releasePacket(byteBuffer);
+    }
+}
+
+void VPNController::STrecvFromServer(BYTE* byteBuffer, int bufferSize){
+     while(1){
+        int bytes_recieved = secureConnection.recv(byteBuffer, bufferSize);
+        if (bytes_recieved >= 20){
+            vpn_class_print("STreadFromWinton", "Recieving packet from Wintun");
+            networkInterface.packet_print(byteBuffer, bytes_recieved);
+            networkInterface.send(byteBuffer, bytes_recieved);
+        }
+        else if (bytes_recieved == 0){
+            //connection closed 
+            vpn_report_error("Connection Closed");
+
+        }
+        else if (bytes_recieved < 0){
+            vpn_report_error("SSL error check SSL_get_error");
+        }
+
+        if (SSL_pending(secureConnection.getSSLPtr()) == 0) {
+            break;
+        }
+    }
+}
+
+void VPNController::singleThreadVPN(){
+    HANDLE sslEvent = WSACreateEvent();
+    SOCKET ssl_sock = secureConnection.getSslSock();
+    
+    WSAEventSelect(ssl_sock, sslEvent, FD_READ | FD_CLOSE);
+    HANDLE wintunEvent = networkInterface.getReadWaitEvent();
+    
+    HANDLE handles[2];
+    handles[0] = wintunEvent;
+    handles[1] = sslEvent;
+    
+    DWORD waitResult;
+    BYTE byteBuffer[65535];
+    int bufferSize = sizeof(byteBuffer);
+
+    while(1){
+        vpn_class_print("singleThreadVPN", "Waiting for a Wintun or SSL packet...");
+        waitResult = WaitForMultipleObjects(2, handles, FALSE, INFINITE);
+        switch(waitResult){
+            case WAIT_OBJECT_0:
+                STreadFromWintun(byteBuffer);
+                break;
+            
+            case WAIT_OBJECT_0 + 1:
+                STrecvFromServer(byteBuffer, bufferSize);
+                WSAResetEvent(sslEvent); 
+                break;
+            case WAIT_FAILED:
+                vpn_class_print("singleThreadVPN", "Error waiting: " + std::to_string(GetLastError()));
+                vpn_report_error("Problem with the wait for multi");
+        }
+        std::cout << std::endl;
+    }
+
 }
 
 void VPNController::close(){

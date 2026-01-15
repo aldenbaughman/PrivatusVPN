@@ -1,6 +1,4 @@
-
 #pragma once
-
 
 #include <WS2tcpip.h>
 #include <openssl/ssl.h>   

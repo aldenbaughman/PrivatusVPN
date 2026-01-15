@@ -21,7 +21,8 @@ int main()
 		VPNController controller{clientSecureConnection, virtualNetworkInterface};
 		//controller.tls_test();
 		controller.start();
-		controller.readFromWintun();
+		controller.singleThreadVPN();
+		//controller.readFromWintun();
 	}
 	catch (const std::runtime_error& e)
 	{
